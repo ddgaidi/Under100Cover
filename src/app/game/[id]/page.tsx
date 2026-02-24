@@ -22,6 +22,9 @@ export default function GamePage() {
   const router = useRouter()
   const { showToast } = useToast()
   const supabase = createClient()
+    const [myClue, setMyClue] = useState('')
+    const [hasSpoken, setHasSpoken] = useState(false)
+    const [hasVoted, setHasVoted] = useState(false)
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setUser(data.user))
@@ -90,7 +93,8 @@ export default function GamePage() {
   }
 
   const submitVote = async () => {
-    if (!selectedVote || !user) return
+      if (hasVoted) return
+      setHasVoted(true)
 
     const newVotes = { ...votes, [user.id]: selectedVote }
     setVotes(newVotes)
@@ -107,8 +111,17 @@ export default function GamePage() {
         })
 
       // Find most voted
-      const mostVoted = Object.entries(voteCounts).sort((a, b) => b[1] - a[1])[0]
+        const sortedVotes = Object.entries(voteCounts).sort((a, b) => b[1] - a[1])
 
+        if (sortedVotes.length > 1 && sortedVotes[0][1] === sortedVotes[1][1]) {
+            showToast('Égalité ! Nouveau vote ! 🔁', 'info', '⚖️')
+            setVotes({})
+            setHasVoted(false)
+            setSelectedVote(null)
+            return
+        }
+
+        const mostVoted = sortedVotes[0]
       if (mostVoted) {
         // Check if mister white
         const eliminatedPlayer = players.find(p => p.user_id === mostVoted[0])
@@ -126,6 +139,10 @@ export default function GamePage() {
   const eliminatePlayer = async (userId: string) => {
     await supabase.from('game_players').update({ is_eliminated: true }).eq('game_id', id).eq('user_id', userId)
 
+      await supabase
+          .from('game_players')
+          .update({ clue: null })
+          .eq('game_id', id)
     const eliminatedPlayer = players.find(p => p.user_id === userId)
     showToast(`${eliminatedPlayer?.username} a été éliminé(e) ! ${eliminatedPlayer?.role === 'undercover' ? '🎉' : '😢'}`, 'info', '💀')
 
@@ -144,6 +161,29 @@ export default function GamePage() {
       await supabase.from('games').update({ status: 'playing', current_turn_index: 0 }).eq('id', id)
     }
   }
+
+    const submitClue = async () => {
+        if (!myClue.trim() || !isMyTurn || hasSpoken) return
+
+        await supabase
+            .from('game_players')
+            .update({ clue: myClue })
+            .eq('game_id', id)
+            .eq('user_id', user.id)
+
+        setHasSpoken(true)
+        setMyClue('')
+
+        // Passe automatiquement au joueur suivant
+        const newIndex = game.current_turn_index + 1
+        const totalActivePlayers = activePlayers.length
+        const newRound = Math.floor(newIndex / totalActivePlayers) + 1
+
+        await supabase.from('games').update({
+            current_turn_index: newIndex,
+            current_round: newRound,
+        }).eq('id', id)
+    }
 
   const submitMisterWhiteGuess = async () => {
     const civilianWord = game?.civilian_word?.toLowerCase().trim()
@@ -263,6 +303,35 @@ export default function GamePage() {
           )}
         </div>
 
+          {!voting && isMyTurn && !myPlayer.is_eliminated && (
+              <div className="p-5 rounded-2xl mb-6"
+                   style={{
+                       background: 'var(--surface)',
+                       border: '3px solid var(--primary)',
+                       boxShadow: 'var(--shadow)',
+                   }}>
+                  <h3 className="font-cartoon text-xl mb-3">
+                      ✍️ Donne ton mot
+                  </h3>
+
+                  <input
+                      type="text"
+                      value={myClue}
+                      onChange={(e) => setMyClue(e.target.value)}
+                      className="input-cartoon mb-3 w-full"
+                      placeholder="Ton indice..."
+                  />
+
+                  <button
+                      onClick={submitClue}
+                      className="btn-cartoon btn-primary w-full"
+                      disabled={!myClue.trim()}
+                  >
+                      📤 Envoyer
+                  </button>
+              </div>
+          )}
+
         {/* Players grid */}
         <div
             className="p-5 rounded-2xl mb-6"
@@ -297,7 +366,24 @@ export default function GamePage() {
                         {player.username} {isMe ? '(moi)' : ''}
                       </p>
                       <p className="font-body text-xs" style={{ color: 'var(--text-secondary)' }}>
-                        {player.is_eliminated ? '💀 Éliminé' : isCurrentTurn ? '🎤 Parle !' : '🎧 Écoute'}
+                          {player.clue && !voting && (
+                              <p className="font-body text-xs mt-1"
+                                 style={{ color: 'var(--primary)' }}>
+                                  💬 {player.clue}
+                              </p>
+                          )}
+                          {player.is_eliminated
+                              ? `💀 Éliminé — ${
+                                  player.role === 'civilian'
+                                      ? '😇 Citoyen'
+                                      : player.role === 'undercover'
+                                          ? '🦹 Undercover'
+                                          : '👻 M. White'
+                              }`
+                              : isCurrentTurn
+                                  ? '🎯 Son tour !'
+                                  : '☁️ Patiente'
+                          }
                       </p>
                     </div>
                   </div>
@@ -324,6 +410,7 @@ export default function GamePage() {
                     .filter(p => p.user_id !== user?.id)
                     .map((player, i) => (
                         <button
+                            disabled={hasVoted}
                             key={player.id}
                             onClick={() => setSelectedVote(player.user_id)}
                             className="flex items-center gap-3 p-3 rounded-xl transition-all text-left"
@@ -341,7 +428,7 @@ export default function GamePage() {
               </div>
               <button
                   onClick={submitVote}
-                  disabled={!selectedVote}
+                  disabled={!selectedVote || hasVoted}
                   className="btn-cartoon w-full text-lg py-3 disabled:opacity-50"
                   style={{
                     background: '#FF4757',
@@ -387,16 +474,6 @@ export default function GamePage() {
                 </button>
               </div>
             </div>
-        )}
-
-        {/* Host controls */}
-        {isHost && !voting && (
-            <button
-                onClick={nextTurn}
-                className="btn-cartoon btn-primary text-lg py-4 w-full"
-            >
-              ➡️ Tour suivant
-            </button>
         )}
       </div>
   )
