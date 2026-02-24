@@ -100,7 +100,8 @@ export default function GamePage() {
     if (Object.keys(newVotes).length >= activePlayers.length) {
       // Count votes
       const voteCounts: Record<string, number> = {}
-      Object.values(newVotes).forEach(v => {
+
+      Object.values(newVotes as Record<string, string>).forEach((v) => {
         voteCounts[v] = (voteCounts[v] || 0) + 1
       })
 
