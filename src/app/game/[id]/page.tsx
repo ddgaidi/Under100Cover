@@ -88,22 +88,35 @@ export default function GamePage() {
   const isMyTurn = currentTurnUserId === user?.id
   const isHost = user && game && game.host_id === user.id
 
-  const nextTurn = async () => {
-    if (!isHost) return
-    const newIndex = game.current_turn_index + 1
-      const totalPlayers = game.turn_order.length
-    const newRound = Math.floor(newIndex / totalActivePlayers) + 1
+    const nextTurn = async () => {
+        if (!isHost) return
 
-    // Check if vote should happen
-    if (newIndex > 0 && newIndex % totalActivePlayers === 0 && (newRound - 1) % game.rounds_before_vote === 0) {
-      await supabase.from('games').update({ status: 'voting', current_turn_index: newIndex }).eq('id', id)
-    } else {
-      await supabase.from('games').update({
-        current_turn_index: newIndex,
-        current_round: newRound,
-      }).eq('id', id)
+        const newIndex = game.current_turn_index + 1
+        const totalPlayers = game.turn_order.length
+        const newRound = Math.floor(newIndex / totalPlayers) + 1
+
+        if (
+            newIndex > 0 &&
+            newIndex % totalPlayers === 0 &&
+            (newRound - 1) % game.rounds_before_vote === 0
+        ) {
+            await supabase
+                .from('games')
+                .update({
+                    status: 'voting',
+                    current_turn_index: newIndex,
+                })
+                .eq('id', id)
+        } else {
+            await supabase
+                .from('games')
+                .update({
+                    current_turn_index: newIndex,
+                    current_round: newRound,
+                })
+                .eq('id', id)
+        }
     }
-  }
 
   const submitVote = async () => {
       if (hasVoted) return
