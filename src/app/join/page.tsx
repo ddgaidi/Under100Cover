@@ -56,10 +56,46 @@ export default function JoinPage() {
   }
 
   const handleJoin = async () => {
-    if (!user || !profile) {
+    let currentUser = user
+    let currentProfile = profile
+
+    // Double check auth if state is not set yet
+    if (!currentUser) {
+      console.log('No user in state, fetching...')
+      const { data } = await supabase.auth.getUser()
+      currentUser = data.user
+      if (currentUser) {
+        console.log('User fetched:', currentUser.id)
+        if (!currentProfile) {
+          const { data: p, error: pError } = await supabase.from('profiles').select('*').eq('id', currentUser.id).single()
+          if (pError) console.error('Error fetching profile:', pError)
+          currentProfile = p
+        }
+      }
+    }
+
+    if (!currentUser) {
       showToast('Tu dois être connecté !', 'error', '🔐')
       return
     }
+
+    // If user is logged in but has no profile, create a default one
+    if (!currentProfile) {
+      console.log('No profile found, creating default...')
+      const { data: newProfile, error: insertError } = await supabase.from('profiles').insert({
+        id: currentUser.id,
+        username: currentUser.email?.split('@')[0] || `Agent_${Math.floor(Math.random() * 1000)}`,
+        avatar_emoji: '🕵️'
+      }).select().single()
+
+      if (insertError) {
+        console.error('Error creating profile:', insertError)
+        showToast('Erreur lors de la création de ton profil. Réessaie !', 'error', '💀')
+        return
+      }
+      currentProfile = newProfile
+    }
+
     const fullCode = code.join('')
     if (fullCode.length !== 6) {
       showToast('Entre un code de 6 chiffres !', 'error', '❌')
@@ -86,7 +122,7 @@ export default function JoinPage() {
         .from('game_players')
         .select('*')
         .eq('game_id', game.id)
-        .eq('user_id', user.id)
+        .eq('user_id', currentUser.id)
         .single()
 
       if (existingPlayer) {
@@ -108,8 +144,8 @@ export default function JoinPage() {
 
       await supabase.from('game_players').insert({
         game_id: game.id,
-        user_id: user.id,
-        username: profile.username,
+        user_id: currentUser.id,
+        username: currentProfile.username,
         is_eliminated: false,
       })
 

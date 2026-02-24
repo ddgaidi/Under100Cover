@@ -22,10 +22,27 @@ export default function ProfilePage() {
       const { data: { user } } = await supabase.auth.getUser()
       if (user) {
         setUser(user)
-        const { data: p } = await supabase.from('profiles').select('*').eq('id', user.id).single()
+        const { data: p, error: pError } = await supabase.from('profiles').select('*').eq('id', user.id).single()
+        
         if (p) {
           setProfile(p)
           setUsername(p.username)
+        } else {
+          // Si l'utilisateur est connecté mais n'a pas de profil, on en crée un
+          console.log('No profile found, creating default...')
+          const { data: newProfile, error: insertError } = await supabase.from('profiles').insert({
+            id: user.id,
+            username: user.email?.split('@')[0] || `Agent_${Math.floor(Math.random() * 1000)}`,
+            avatar_emoji: '🕵️'
+          }).select().single()
+
+          if (!insertError && newProfile) {
+            setProfile(newProfile)
+            setUsername(newProfile.username)
+          } else {
+            console.error('Error creating profile:', insertError)
+            showToast('Erreur lors de la récupération de ton profil.', 'error', '💀')
+          }
         }
       } else {
         router.push('/auth')

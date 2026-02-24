@@ -43,17 +43,39 @@ export default function CreatePage() {
 
     // Double check auth if state is not set yet
     if (!currentUser) {
+      console.log('No user in state, fetching...')
       const { data } = await supabase.auth.getUser()
       currentUser = data.user
-      if (currentUser && !currentProfile) {
-        const { data: p } = await supabase.from('profiles').select('*').eq('id', currentUser.id).single()
-        currentProfile = p
+      if (currentUser) {
+        console.log('User fetched:', currentUser.id)
+        if (!currentProfile) {
+          const { data: p, error: pError } = await supabase.from('profiles').select('*').eq('id', currentUser.id).single()
+          if (pError) console.error('Error fetching profile:', pError)
+          currentProfile = p
+        }
       }
     }
 
-    if (!currentUser || !currentProfile) {
+    if (!currentUser) {
       showToast('Tu dois être connecté !', 'error', '🔐')
       return
+    }
+
+    // If user is logged in but has no profile, create a default one
+    if (!currentProfile) {
+      console.log('No profile found, creating default...')
+      const { data: newProfile, error: insertError } = await supabase.from('profiles').insert({
+        id: currentUser.id,
+        username: currentUser.email?.split('@')[0] || `Agent_${Math.floor(Math.random() * 1000)}`,
+        avatar_emoji: '🕵️'
+      }).select().single()
+
+      if (insertError) {
+        console.error('Error creating profile:', insertError)
+        showToast('Erreur lors de la création de ton profil. Réessaie !', 'error', '💀')
+        return
+      }
+      currentProfile = newProfile
     }
     setLoading(true)
     try {

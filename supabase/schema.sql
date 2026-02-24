@@ -3,8 +3,6 @@
 -- =============================================
 -- Run this in Supabase SQL Editor
 
--- Enable RLS
-ALTER DATABASE postgres SET "app.settings.jwt_secret" TO 'your-jwt-secret';
 
 -- =============================================
 -- PROFILES TABLE
