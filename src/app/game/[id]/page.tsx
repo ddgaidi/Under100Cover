@@ -23,13 +23,14 @@ export default function GamePage() {
     const { showToast } = useToast()
     const supabase = createClient()
 
+    // ✅ HOOK 1
     useEffect(() => {
         supabase.auth.getUser().then(({ data }) => setUser(data.user))
     }, [])
 
+    // ✅ HOOK 2
     useEffect(() => {
         if (!id || !user) return
-
         const fetchData = async () => {
             const { data: g } = await supabase.from('games').select('*').eq('id', id).single()
             setGame(g)
@@ -37,7 +38,6 @@ export default function GamePage() {
             setPlayers(p || [])
             setMyPlayer((p || []).find((pl: any) => pl.user_id === user.id))
         }
-
         fetchData()
 
         const gameSub = supabase
@@ -56,34 +56,37 @@ export default function GamePage() {
         return () => { supabase.removeChannel(gameSub) }
     }, [id, user])
 
-    if (!game || !myPlayer) {
-        return (
-            <div className="min-h-[70vh] flex items-center justify-center">
-                <div className="cartoon-spinner" />
-            </div>
-        )
-    }
+    // ✅ HOOK 3 — toujours exécuté, garde dedans les conditions
+    useEffect(() => {
+        if (!game || !players.length || !user) return
+        if (game.status !== 'voting') return
+        const activePl = players.filter(p => !p.is_eliminated)
+        if (activePl.length === 0) return
+        const allVoted = activePl.every(p => p.vote_target)
+        if (!allVoted) return
+        const resolver = [...activePl].sort((a, b) => b.user_id.localeCompare(a.user_id))[0]
+        if (resolver?.user_id === user.id) {
+            resolveVotes(players)
+        }
+    }, [players])
 
-    const totalPlayers = game.turn_order?.length || 1
-    const currentTurnIndex = game.current_turn_index || 0
-    const currentRound = Math.floor(currentTurnIndex / totalPlayers) // 0-indexé
-    const currentTurnUserId = game.turn_order?.[currentTurnIndex % totalPlayers]
+    // ── Dérivés (pas des hooks) ──────────────────────────────────────
+    const totalPlayers = game?.turn_order?.length || 1
+    const currentTurnIndex = game?.current_turn_index || 0
+    const currentRound = Math.floor(currentTurnIndex / totalPlayers)
+    const currentTurnUserId = game?.turn_order?.[currentTurnIndex % totalPlayers]
     const isMyTurn = currentTurnUserId === user?.id
     const isVoting = game?.status === 'voting'
     const activePlayers = players.filter(p => !p.is_eliminated)
-
-    // ✅ La source de vérité : est-ce que j'ai déjà soumis pour CE round ?
-    const myClues: string[] = myPlayer.clues || []
+    const myClues: string[] = myPlayer?.clues || []
     const hasSpokenThisRound = myClues.length > currentRound
+    const hasVotedThisRound = !!myPlayer?.vote_target
 
-    // ✅ Est-ce que j'ai déjà voté pour CE round de vote ?
-    const hasVotedThisRound = !!myPlayer.vote_target
-
+    // ── Fonctions ────────────────────────────────────────────────────
     const submitClue = async () => {
-        if (!myClue.trim() || !isMyTurn || hasSpokenThisRound || isSubmitting) return
+        if (!myClue.trim() || !isMyTurn || hasSpokenThisRound || isSubmitting || !game) return
         setIsSubmitting(true)
 
-        // Ajouter le clue à l'array en base
         await supabase
             .from('game_players')
             .update({ clues: [...myClues, myClue.trim()] })
@@ -91,11 +94,10 @@ export default function GamePage() {
             .eq('user_id', user.id)
 
         const newIndex = currentTurnIndex + 1
-        const newRound = Math.floor(newIndex / totalPlayers) // ex: Math.floor(1/3) = 0
-        const completedAllRounds = newRound >= game.rounds_before_vote // 0 >= 2 = false ✅
+        const newRound = Math.floor(newIndex / totalPlayers)
+        const completedAllRounds = newIndex % totalPlayers === 0 && newRound >= game.rounds_before_vote
 
-        if (newIndex % totalPlayers === 0 && completedAllRounds) {
-            // Tout le monde a parlé tous ses tours → VOTE
+        if (completedAllRounds) {
             await supabase.from('games').update({
                 status: 'voting',
                 current_turn_index: newIndex,
@@ -122,12 +124,7 @@ export default function GamePage() {
             .eq('game_id', id)
             .eq('user_id', user.id)
 
-        // Recharger tous les joueurs pour voir si tout le monde a voté
-        const { data: allPlayers } = await supabase
-            .from('game_players')
-            .select('*')
-            .eq('game_id', id)
-
+        const { data: allPlayers } = await supabase.from('game_players').select('*').eq('game_id', id)
         const activePl = (allPlayers || []).filter((p: any) => !p.is_eliminated)
         const votedCount = activePl.filter((p: any) => p.vote_target).length
 
@@ -136,7 +133,6 @@ export default function GamePage() {
         } else {
             showToast('Vote soumis ! En attente des autres...', 'success', '🗳️')
         }
-
         setIsSubmitting(false)
     }
 
@@ -146,10 +142,8 @@ export default function GamePage() {
         activePl.forEach((p: any) => {
             if (p.vote_target) voteCounts[p.vote_target] = (voteCounts[p.vote_target] || 0) + 1
         })
-
         const sorted = Object.entries(voteCounts).sort((a, b) => b[1] - a[1])
 
-        // Reset votes
         await supabase.from('game_players').update({ vote_target: null }).eq('game_id', id)
 
         if (sorted.length > 1 && sorted[0][1] === sorted[1][1]) {
@@ -161,8 +155,8 @@ export default function GamePage() {
         const mostVotedId = sorted[0]?.[0]
         if (!mostVotedId) return
 
-        const eliminatedPlayer = allPlayers.find((p: any) => p.user_id === mostVotedId)
-        if (eliminatedPlayer?.role === 'mister_white') {
+        const eliminated = allPlayers.find((p: any) => p.user_id === mostVotedId)
+        if (eliminated?.role === 'mister_white') {
             setShowMisterWhiteGuess(true)
             return
         }
@@ -172,9 +166,7 @@ export default function GamePage() {
 
     const eliminatePlayer = async (userId: string, allPlayers?: any[]) => {
         const currentPlayers = allPlayers || players
-
         await supabase.from('game_players').update({ is_eliminated: true }).eq('game_id', id).eq('user_id', userId)
-        // Reset clues et votes pour le prochain round
         await supabase.from('game_players').update({ clues: [], vote_target: null }).eq('game_id', id)
 
         const eliminated = currentPlayers.find((p: any) => p.user_id === userId)
@@ -199,23 +191,9 @@ export default function GamePage() {
         }
     }
 
-    // APRÈS (safe)
-    useEffect(() => {
-        if (!isVoting || !players.length || !user || isSubmitting) return
-        const activePl = players.filter(p => !p.is_eliminated)
-        if (activePl.length === 0) return
-        const allVoted = activePl.every(p => p.vote_target)
-        if (!allVoted) return
-        const resolver = [...activePl].sort((a, b) => b.user_id.localeCompare(a.user_id))[0]
-        if (resolver?.user_id === user.id) {
-            resolveVotes(players)
-        }
-    }, [players, isVoting, user?.id])
-
     const submitMisterWhiteGuess = async () => {
         const civilianWord = game?.civilian_word?.toLowerCase().trim()
         const guess = misterWhiteGuess.toLowerCase().trim()
-
         if (guess === civilianWord) {
             showToast('Mister White a deviné ! Il gagne ! 👻', 'info', '👻')
             await supabase.from('games').update({ status: 'finished' }).eq('id', id)
@@ -225,6 +203,15 @@ export default function GamePage() {
             if (mw) await eliminatePlayer(mw.user_id)
         }
         setShowMisterWhiteGuess(false)
+    }
+
+    // ── Early returns APRÈS tous les hooks ──────────────────────────
+    if (!game || !myPlayer) {
+        return (
+            <div className="min-h-[70vh] flex items-center justify-center">
+                <div className="cartoon-spinner" />
+            </div>
+        )
     }
 
     if (game.status === 'finished') {
@@ -256,6 +243,7 @@ export default function GamePage() {
         )
     }
 
+    // ── Render principal ─────────────────────────────────────────────
     return (
         <div className="max-w-2xl mx-auto px-6 py-8">
             {/* Word card */}
@@ -290,9 +278,11 @@ export default function GamePage() {
                 <div className="p-5 rounded-2xl mb-6"
                      style={{ background: 'var(--surface)', border: '3px solid var(--primary)', boxShadow: 'var(--shadow)' }}>
                     <h3 className="font-cartoon text-xl mb-1">✍️ Manche {currentRound + 1} — donne ton mot</h3>
-                    <p className="font-body text-xs mb-3" style={{ color: 'var(--text-secondary)' }}>
-                        {myClues.length > 0 && `Tes mots précédents : ${myClues.join(', ')}`}
-                    </p>
+                    {myClues.length > 0 && (
+                        <p className="font-body text-xs mb-3" style={{ color: 'var(--text-secondary)' }}>
+                            Tes mots précédents : {myClues.join(', ')}
+                        </p>
+                    )}
                     <input
                         type="text"
                         value={myClue}
@@ -309,7 +299,7 @@ export default function GamePage() {
                 </div>
             )}
 
-            {/* En attente si j'ai déjà parlé ce round */}
+            {/* En attente */}
             {!isVoting && !isMyTurn && !myPlayer.is_eliminated && (
                 <div className="p-4 rounded-2xl mb-6 text-center"
                      style={{ background: 'var(--surface)', border: '2px dashed var(--border)' }}>
@@ -344,12 +334,11 @@ export default function GamePage() {
                                         {player.username} {isMe ? '(moi)' : ''}
                                     </p>
                                 </div>
-                                {/* Affichage de tous les clues empilés */}
                                 {playerClues.length > 0 && !isVoting && (
                                     <div className="flex flex-col gap-0.5 ml-8">
                                         {playerClues.map((clue, ci) => (
                                             <p key={ci} className="font-body text-xs" style={{ color: 'var(--primary)' }}>
-                                                💬 <span className="font-medium">{clue}</span>
+                                                💬 {clue}
                                             </p>
                                         ))}
                                     </div>
@@ -367,7 +356,7 @@ export default function GamePage() {
                 </div>
             </div>
 
-            {/* Voting section */}
+            {/* Voting */}
             {isVoting && !myPlayer.is_eliminated && (
                 <div className="p-5 rounded-2xl mb-6"
                      style={{ background: 'var(--surface)', border: '3px solid var(--accent-red)', boxShadow: '6px 6px 0px var(--accent-red)' }}>
