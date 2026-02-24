@@ -22,13 +22,16 @@ export default function LobbyPage() {
     }, [])
 
     useEffect(() => {
-        if (!id || !user) return // on attend que l'user soit défini
+        if (!id) return
+        if (!user) return
+
+        let redirected = false // <-- flag pour ne rediriger qu'une seule fois
 
         const fetchData = async () => {
             const { data: g } = await supabase.from('games').select('*').eq('id', id).single()
             setGame(g)
-            // on redirige seulement si le jeu est en "playing"
-            if (g?.status === 'playing') {
+            if (g?.status === 'playing' && !redirected) {
+                redirected = true
                 router.replace(`/game/${id}`)
             }
 
@@ -38,13 +41,13 @@ export default function LobbyPage() {
 
         fetchData()
 
-        // Realtime subscription
         const gameSub = supabase
             .channel(`lobby-${id}`)
             .on('postgres_changes', { event: '*', schema: 'public', table: 'games', filter: `id=eq.${id}` }, (payload: any) => {
                 setGame(payload.new)
-                if (payload.new.status === 'playing') {
-                    router.replace(`/game/${id}`) // replace pour éviter de empiler l'historique
+                if (payload.new.status === 'playing' && !redirected) {
+                    redirected = true
+                    router.replace(`/game/${id}`)
                 }
             })
             .on('postgres_changes', { event: '*', schema: 'public', table: 'game_players', filter: `game_id=eq.${id}` }, () => {
@@ -52,7 +55,9 @@ export default function LobbyPage() {
             })
             .subscribe()
 
-        return () => { supabase.removeChannel(gameSub) }
+        return () => {
+            supabase.removeChannel(gameSub)
+        }
     }, [id, user])
 
     const isHost = user && game && game.host_id === user.id
