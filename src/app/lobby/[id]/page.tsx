@@ -22,56 +22,59 @@ export default function LobbyPage() {
   }, [])
 
   useEffect(() => {
-    if (!id) return
+    if (!id) return;
 
+    // 1. Fonction de chargement initial
     const fetchData = async () => {
-      const { data: g } = await supabase.from('games').select('*').eq('id', id).single()
-      setGame(g)
-      if (g?.status === 'playing') {
-        router.push(`/game/${id}`)
+      const { data: g } = await supabase.from('games').select('*').eq('id', id).single();
+      if (g) {
+        setGame(g);
+        if (g.status === 'playing') router.push(`/game/${id}`);
       }
 
       const { data: p } = await supabase
-        .from('game_players')
-        .select('*, profiles(avatar_emoji)')
-        .eq('game_id', id)
-      setPlayers(p || [])
-    }
+          .from('game_players')
+          .select('*, profiles(avatar_emoji)')
+          .eq('game_id', id);
+      if (p) setPlayers(p);
+    };
 
-    fetchData()
+    fetchData();
 
-    // Realtime subscription
+    // 2. Canal unique pour tout le lobby
     const channel = supabase
-      .channel(`lobby-${id}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'games', filter: `id=eq.${id}` },
-        (payload: any) => {
-          console.log('Game change received:', payload)
-          setGame(payload.new)
-          if (payload.new.status === 'playing') {
-            router.push(`/game/${id}`)
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'game_players', filter: `game_id=eq.${id}` },
-        async (payload: any) => {
-          console.log('Player change received:', payload)
-          const { data: p } = await supabase
-            .from('game_players')
-            .select('*, profiles(avatar_emoji)')
-            .eq('game_id', id)
-          setPlayers(p || [])
-        }
-      )
-      .subscribe()
+        .channel(`lobby_room_${id}`)
+        .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'games', filter: `id=eq.${id}` },
+            (payload) => {
+              const updatedGame = payload.new as any;
+              setGame(updatedGame);
+
+              // REDIRECTION SYNCHRONISÉE : Si l'hôte lance la partie
+              if (updatedGame.status === 'playing') {
+                router.push(`/game/${id}`);
+              }
+            }
+        )
+        .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'game_players', filter: `game_id=eq.${id}` },
+            async () => {
+              // On rafraîchit la liste des joueurs (avec les emojis des profils)
+              const { data: p } = await supabase
+                  .from('game_players')
+                  .select('*, profiles(avatar_emoji)')
+                  .eq('game_id', id);
+              if (p) setPlayers(p);
+            }
+        )
+        .subscribe();
 
     return () => {
-      supabase.removeChannel(channel)
-    }
-  }, [id])
+      supabase.removeChannel(channel);
+    };
+  }, [id, router]);
 
   const isHost = user && game && game.host_id === user.id
 

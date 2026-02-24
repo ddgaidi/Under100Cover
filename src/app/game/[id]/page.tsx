@@ -51,28 +51,38 @@ export default function GamePage() {
 
     const gameSub = supabase
       .channel(`game-${id}`)
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'games', filter: `id=eq.${id}` }, (payload: any) => {
-        setGame(payload.new)
-        if (payload.new.status === 'voting') {
-          setVoting(true)
-          setVotes({})
-          setSelectedVote(null)
-        } else if (payload.new.status !== 'voting') {
-          setVoting(false)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'games', filter: `id=eq.${id}` }, async (payload: any) => {
+        console.log('Game update received in game room:', payload)
+        // Refetch to ensure consistency and get all fields
+        const { data: g } = await supabase.from('games').select('*').eq('id', id).single()
+        if (g) {
+          setGame(g)
+          if (g.status === 'voting') {
+            setVoting(true)
+            setVotes({})
+            setSelectedVote(null)
+          } else if (g.status !== 'voting') {
+            setVoting(false)
+          }
         }
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'game_players', filter: `game_id=eq.${id}` }, () => {
+        console.log('Player change received in game room')
         supabase
           .from('game_players')
           .select('*, profiles(avatar_emoji)')
           .eq('game_id', id)
           .then(({ data }) => {
-            setPlayers(data || [])
-            const me = (data || []).find((pl: any) => pl.user_id === user?.id)
-            setMyPlayer(me)
+            if (data) {
+              setPlayers(data)
+              const me = data.find((pl: any) => pl.user_id === user?.id)
+              setMyPlayer(me)
+            }
           })
       })
-      .subscribe()
+      .subscribe((status) => {
+        console.log(`Game room subscription status for ${id}:`, status)
+      })
 
     return () => { supabase.removeChannel(gameSub) }
   }, [id, user])
