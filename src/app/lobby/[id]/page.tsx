@@ -31,27 +31,46 @@ export default function LobbyPage() {
         router.push(`/game/${id}`)
       }
 
-      const { data: p } = await supabase.from('game_players').select('*').eq('game_id', id)
+      const { data: p } = await supabase
+        .from('game_players')
+        .select('*, profiles(avatar_emoji)')
+        .eq('game_id', id)
       setPlayers(p || [])
     }
 
     fetchData()
 
     // Realtime subscription
-    const gameSub = supabase
+    const channel = supabase
       .channel(`lobby-${id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'games', filter: `id=eq.${id}` }, (payload: any) => {
-        setGame(payload.new)
-        if (payload.new.status === 'playing') {
-          router.push(`/game/${id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'games', filter: `id=eq.${id}` },
+        (payload: any) => {
+          console.log('Game change received:', payload)
+          setGame(payload.new)
+          if (payload.new.status === 'playing') {
+            router.push(`/game/${id}`)
+          }
         }
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'game_players', filter: `game_id=eq.${id}` }, () => {
-        supabase.from('game_players').select('*').eq('game_id', id).then(({ data }) => setPlayers(data || []))
-      })
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'game_players', filter: `game_id=eq.${id}` },
+        async (payload: any) => {
+          console.log('Player change received:', payload)
+          const { data: p } = await supabase
+            .from('game_players')
+            .select('*, profiles(avatar_emoji)')
+            .eq('game_id', id)
+          setPlayers(p || [])
+        }
+      )
       .subscribe()
 
-    return () => { supabase.removeChannel(gameSub) }
+    return () => {
+      supabase.removeChannel(channel)
+    }
   }, [id])
 
   const isHost = user && game && game.host_id === user.id
@@ -108,6 +127,7 @@ export default function LobbyPage() {
         turn_order: turnOrder,
         current_round: 1,
         current_turn_index: 0,
+        turn_started_at: new Date().toISOString(),
       }).eq('id', id)
 
       showToast('La partie commence ! 🎭', 'success', '🚀')
@@ -234,7 +254,7 @@ export default function LobbyPage() {
                 animationDelay: `${i * 0.1}s`,
               }}
             >
-              <span className="text-2xl">{PLAYER_EMOJIS[i % PLAYER_EMOJIS.length]}</span>
+              <span className="text-2xl">{player.profiles?.avatar_emoji || PLAYER_EMOJIS[i % PLAYER_EMOJIS.length]}</span>
               <div className="min-w-0">
                 <p className="font-bold font-body text-sm truncate" style={{ color: 'var(--text)' }}>
                   {player.username}

@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS public.games (
   mister_white_count INTEGER DEFAULT 0 CHECK (mister_white_count >= 0),
   current_round INTEGER DEFAULT 0,
   current_turn_index INTEGER DEFAULT 0,
+  turn_started_at TIMESTAMPTZ DEFAULT NOW(),
   turn_order TEXT[] DEFAULT '{}',
   civilian_word TEXT,
   undercover_word TEXT,
@@ -78,6 +79,7 @@ CREATE TABLE IF NOT EXISTS public.game_players (
   username TEXT NOT NULL,
   role TEXT CHECK (role IN ('civilian', 'undercover', 'mister_white')),
   word TEXT,
+  description TEXT,
   is_eliminated BOOLEAN DEFAULT FALSE,
   joined_at TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE(game_id, user_id)

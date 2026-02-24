@@ -19,6 +19,9 @@ export default function GamePage() {
   const [votes, setVotes] = useState<Record<string, string>>({}) // voter_id -> target_id
   const [misterWhiteGuess, setMisterWhiteGuess] = useState('')
   const [showMisterWhiteGuess, setShowMisterWhiteGuess] = useState(false)
+  const [descriptionInput, setDescriptionInput] = useState('')
+  const [timeLeft, setTimeLeft] = useState(20)
+  const [sending, setSending] = useState(false)
   const router = useRouter()
   const { showToast } = useToast()
   const supabase = createClient()
@@ -34,7 +37,10 @@ export default function GamePage() {
       const { data: g } = await supabase.from('games').select('*').eq('id', id).single()
       setGame(g)
 
-      const { data: p } = await supabase.from('game_players').select('*').eq('game_id', id)
+      const { data: p } = await supabase
+        .from('game_players')
+        .select('*, profiles(avatar_emoji)')
+        .eq('game_id', id)
       setPlayers(p || [])
 
       const me = (p || []).find((pl: any) => pl.user_id === user.id)
@@ -56,11 +62,15 @@ export default function GamePage() {
         }
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'game_players', filter: `game_id=eq.${id}` }, () => {
-        supabase.from('game_players').select('*').eq('game_id', id).then(({ data }) => {
-          setPlayers(data || [])
-          const me = (data || []).find((pl: any) => pl.user_id === user?.id)
-          setMyPlayer(me)
-        })
+        supabase
+          .from('game_players')
+          .select('*, profiles(avatar_emoji)')
+          .eq('game_id', id)
+          .then(({ data }) => {
+            setPlayers(data || [])
+            const me = (data || []).find((pl: any) => pl.user_id === user?.id)
+            setMyPlayer(me)
+          })
       })
       .subscribe()
 
@@ -72,21 +82,85 @@ export default function GamePage() {
   const isMyTurn = currentTurnUserId === user?.id
   const isHost = user && game && game.host_id === user.id
 
-  const nextTurn = async () => {
+  // Timer logic
+  useEffect(() => {
+    if (!game || game.status !== 'playing' || voting) return
+
+    const calculateTimeLeft = () => {
+      const startedAt = new Date(game.turn_started_at).getTime()
+      const now = new Date().getTime()
+      const diff = Math.max(0, 20 - Math.floor((now - startedAt) / 1000))
+      setTimeLeft(diff)
+
+      if (diff === 0 && isHost) {
+        // Auto skip or next turn if time is up (host triggers it to avoid everyone doing it)
+        // But better if the active player handles it, or anyone can? 
+        // Let's have the host handle turn transitions for consistency.
+        handleNextTurnAuto()
+      }
+    }
+
+    calculateTimeLeft()
+    const timer = setInterval(calculateTimeLeft, 1000)
+    return () => clearInterval(timer)
+  }, [game, voting, isHost])
+
+  const handleNextTurnAuto = async () => {
     if (!isHost) return
-    const newIndex = game.current_turn_index + 1
+    // If time is up, we move to next turn
+    // We might want to clear the description of the player who skipped
+    const currentTurnPlayer = players.find(p => p.user_id === currentTurnUserId)
+    if (currentTurnPlayer) {
+        // Optionally update their description to "Pas de mot..."
+    }
+    await nextTurn()
+  }
+
+  const submitDescription = async () => {
+    if (!descriptionInput.trim() || !isMyTurn || sending) return
+    setSending(true)
+    try {
+      // Update my description
+      await supabase
+        .from('game_players')
+        .update({ description: descriptionInput.trim() })
+        .eq('game_id', id)
+        .eq('user_id', user.id)
+
+      setDescriptionInput('')
+      
+      // Move to next turn
+      // Note: In a real app, you might want a DB function to do this atomically
+      await nextTurn()
+    } catch (err: any) {
+      showToast(err.message, 'error', '💀')
+    } finally {
+      setSending(false)
+    }
+  }
+
+  const nextTurn = async () => {
+    // We need to fetch the latest game state to avoid race conditions
+    const { data: latestGame } = await supabase.from('games').select('*').eq('id', id).single()
+    if (!latestGame) return
+
+    const newIndex = latestGame.current_turn_index + 1
     const totalActivePlayers = activePlayers.length
     const newRound = Math.floor(newIndex / totalActivePlayers) + 1
 
-    // Check if vote should happen
-    if (newIndex > 0 && newIndex % totalActivePlayers === 0 && (newRound - 1) % game.rounds_before_vote === 0) {
-      await supabase.from('games').update({ status: 'voting', current_turn_index: newIndex }).eq('id', id)
-    } else {
-      await supabase.from('games').update({
-        current_turn_index: newIndex,
-        current_round: newRound,
-      }).eq('id', id)
+    const updateData: any = {
+      current_turn_index: newIndex,
+      turn_started_at: new Date().toISOString(),
     }
+
+    // Check if vote should happen
+    if (newIndex > 0 && newIndex % totalActivePlayers === 0 && (newRound - 1) % latestGame.rounds_before_vote === 0) {
+      updateData.status = 'voting'
+    } else {
+      updateData.current_round = newRound
+    }
+
+    await supabase.from('games').update(updateData).eq('id', id)
   }
 
   const submitVote = async () => {
@@ -140,7 +214,14 @@ export default function GamePage() {
       await supabase.from('games').update({ status: 'finished' }).eq('id', id)
       showToast('Les infiltrés ont gagné ! 🦹', 'success', '🦹')
     } else {
-      await supabase.from('games').update({ status: 'playing', current_turn_index: 0 }).eq('id', id)
+      await supabase.from('games').update({ 
+        status: 'playing', 
+        current_turn_index: 0,
+        turn_started_at: new Date().toISOString()
+      }).eq('id', id)
+      
+      // Clear all descriptions for the next round
+      await supabase.from('game_players').update({ description: null }).eq('game_id', id)
     }
   }
 
@@ -185,7 +266,7 @@ export default function GamePage() {
                 }}
               >
                 <div className="flex items-center gap-2">
-                  <span className="text-xl">{PLAYER_EMOJIS[i % PLAYER_EMOJIS.length]}</span>
+                  <span className="text-xl">{p.profiles?.avatar_emoji || PLAYER_EMOJIS[i % PLAYER_EMOJIS.length]}</span>
                   <span className="font-bold font-body" style={{ color: 'var(--text)' }}>{p.username}</span>
                 </div>
                 <span
@@ -252,12 +333,41 @@ export default function GamePage() {
           </p>
         ) : (
           <>
-            <p className="font-body text-xs font-bold mb-1" style={{ color: 'var(--text-secondary)' }}>
-              Tour {game.current_round} • {isMyTurn ? 'C\'est ton tour !' : 'Tour de...'}
-            </p>
+            <div className="flex justify-between items-center mb-1">
+              <p className="font-body text-xs font-bold" style={{ color: 'var(--text-secondary)' }}>
+                Tour {game.current_round} • {isMyTurn ? 'C\'est ton tour !' : 'Tour de...'}
+              </p>
+              <div 
+                className={`px-3 py-1 rounded-full font-cartoon text-sm border-2 ${timeLeft <= 5 ? 'animate-pulse bg-red-500 text-white' : 'bg-white text-border'}`}
+                style={{ borderColor: 'var(--border)' }}
+              >
+                ⏱️ {timeLeft}s
+              </div>
+            </div>
             <p className="font-cartoon text-3xl" style={{ color: isMyTurn ? 'var(--border)' : 'var(--text)' }}>
               {isMyTurn ? '🎤 À TOI !' : `${players.find(p => p.user_id === currentTurnUserId)?.username || '...'}`}
             </p>
+
+            {isMyTurn && (
+              <div className="mt-4 flex gap-2">
+                <input
+                  type="text"
+                  value={descriptionInput}
+                  onChange={(e) => setDescriptionInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && submitDescription()}
+                  placeholder="Décris ton mot..."
+                  className="input-cartoon flex-1"
+                  autoFocus
+                />
+                <button
+                  onClick={submitDescription}
+                  disabled={!descriptionInput.trim() || sending}
+                  className="btn-cartoon btn-pink py-2"
+                >
+                  {sending ? '⏳' : 'Envoyer'}
+                </button>
+              </div>
+            )}
           </>
         )}
       </div>
@@ -290,11 +400,18 @@ export default function GamePage() {
                   transform: isCurrentTurn ? 'scale(1.02)' : 'scale(1)',
                 }}
               >
-                <span className="text-2xl">{player.is_eliminated ? '💀' : PLAYER_EMOJIS[i % PLAYER_EMOJIS.length]}</span>
-                <div className="min-w-0">
-                  <p className="font-bold font-body text-sm truncate" style={{ color: 'var(--text)' }}>
-                    {player.username} {isMe ? '(moi)' : ''}
-                  </p>
+                <span className="text-2xl">{player.is_eliminated ? '💀' : player.profiles?.avatar_emoji || PLAYER_EMOJIS[i % PLAYER_EMOJIS.length]}</span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex justify-between items-start">
+                    <p className="font-bold font-body text-sm truncate" style={{ color: 'var(--text)' }}>
+                      {player.username} {isMe ? '(moi)' : ''}
+                    </p>
+                    {player.description && !player.is_eliminated && (
+                      <span className="font-body text-[10px] px-2 py-0.5 rounded-lg bg-white border border-border italic truncate max-w-[80px]">
+                        "{player.description}"
+                      </span>
+                    )}
+                  </div>
                   <p className="font-body text-xs" style={{ color: 'var(--text-secondary)' }}>
                     {player.is_eliminated ? '💀 Éliminé' : isCurrentTurn ? '🎤 Parle !' : '🎧 Écoute'}
                   </p>
@@ -333,7 +450,7 @@ export default function GamePage() {
                     transform: selectedVote === player.user_id ? 'scale(1.02)' : 'scale(1)',
                   }}
                 >
-                  <span className="text-2xl">{PLAYER_EMOJIS[i % PLAYER_EMOJIS.length]}</span>
+                  <span className="text-2xl">{player.profiles?.avatar_emoji || PLAYER_EMOJIS[i % PLAYER_EMOJIS.length]}</span>
                   <span className="font-bold font-body">{player.username}</span>
                 </button>
               ))}
