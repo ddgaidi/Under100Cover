@@ -91,7 +91,7 @@ export default function GamePage() {
   const nextTurn = async () => {
     if (!isHost) return
     const newIndex = game.current_turn_index + 1
-    const totalActivePlayers = activePlayers.length
+      const totalPlayers = game.turn_order.length
     const newRound = Math.floor(newIndex / totalActivePlayers) + 1
 
     // Check if vote should happen
@@ -188,8 +188,8 @@ export default function GamePage() {
         setMyClue('')
 
         const newIndex = game.current_turn_index + 1
-        const totalActivePlayers = activePlayers.length
-        const newRound = Math.floor(newIndex / totalActivePlayers) + 1
+        const totalPlayers = game.turn_order.length
+        const newRound = Math.floor(newIndex / totalPlayers) + 1
 
         await supabase.from('games').update({
             current_turn_index: newIndex,
