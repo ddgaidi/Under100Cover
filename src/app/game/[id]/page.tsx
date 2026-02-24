@@ -99,10 +99,12 @@ export default function GamePage() {
     const activePlayers = players.filter(p => !p.is_eliminated)
     if (Object.keys(newVotes).length >= activePlayers.length) {
       // Count votes
-      const voteCounts: Record<string, number> = {}
-      Object.values(newVotes).forEach(v => {
-        voteCounts[v] = (voteCounts[v] || 0) + 1
-      })
+        // Count votes
+        const voteCounts: Record<string, number> = {}
+        Object.values(newVotes).forEach((v) => {
+            const voteTarget = v as string; // Explicitly cast to string
+            voteCounts[voteTarget] = (voteCounts[voteTarget] || 0) + 1
+        })
 
       // Find most voted
       const mostVoted = Object.entries(voteCounts).sort((a, b) => b[1] - a[1])[0]
