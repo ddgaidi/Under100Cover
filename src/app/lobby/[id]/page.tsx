@@ -21,6 +21,32 @@ export default function LobbyPage() {
     supabase.auth.getUser().then(({ data }) => setUser(data.user))
   }, [])
 
+    useEffect(() => {
+        if (!id || !user) return;
+
+        const joinIfMissing = async () => {
+            // Vérifier si je suis déjà dans la liste
+            const { data: existing } = await supabase
+                .from('game_players')
+                .select('id')
+                .eq('game_id', id)
+                .eq('user_id', user.id)
+                .single();
+
+            if (!existing) {
+                // S'insérer si absent
+                await supabase.from('game_players').insert({
+                    game_id: id,
+                    user_id: user.id,
+                    username: user.user_metadata?.username || 'Joueur'
+                });
+                // Le Realtime prendra le relais pour mettre à jour l'UI
+            }
+        };
+
+        joinIfMissing();
+    }, [id, user]);
+
   useEffect(() => {
     if (!id) return;
 
