@@ -70,6 +70,19 @@ export default function GamePage() {
     return () => { supabase.removeChannel(gameSub) }
   }, [id, user])
 
+    useEffect(() => {
+        if (!game || !user) return
+
+        const currentTurnUserId =
+            game.turn_order?.[game.current_turn_index % (game.turn_order?.length || 1)]
+
+        // Si ce n'est plus mon tour → reset
+        if (currentTurnUserId !== user.id) {
+            setHasSpoken(false)
+            setMyClue('')
+        }
+    }, [game?.current_turn_index])
+
   const activePlayers = players.filter(p => !p.is_eliminated)
   const currentTurnUserId = game?.turn_order?.[game?.current_turn_index % (game?.turn_order?.length || 1)]
   const isMyTurn = currentTurnUserId === user?.id
@@ -174,7 +187,6 @@ export default function GamePage() {
         setHasSpoken(true)
         setMyClue('')
 
-        // Passe automatiquement au joueur suivant
         const newIndex = game.current_turn_index + 1
         const totalActivePlayers = activePlayers.length
         const newRound = Math.floor(newIndex / totalActivePlayers) + 1
@@ -183,6 +195,13 @@ export default function GamePage() {
             current_turn_index: newIndex,
             current_round: newRound,
         }).eq('id', id)
+
+        // 🔥 update locale immédiate (plus besoin de refresh)
+        setGame((prev: any) => ({
+            ...prev,
+            current_turn_index: newIndex,
+            current_round: newRound,
+        }))
     }
 
   const submitMisterWhiteGuess = async () => {
@@ -253,22 +272,21 @@ export default function GamePage() {
   return (
       <div className="max-w-2xl mx-auto px-6 py-8">
         {/* My word card */}
-        <div
-            className="p-6 rounded-3xl mb-6 text-center cursor-pointer hover-lift"
-            style={{
-              background: myPlayer.role === 'civilian' ? 'var(--accent-blue)' : myPlayer.role === 'undercover' ? 'var(--accent-pink)' : 'var(--accent-purple)',
-              border: '3px solid var(--border)',
-              boxShadow: 'var(--shadow-xl)',
-            }}
-            onClick={() => setWordRevealed(!wordRevealed)}
-        >
-          <p className="font-body text-sm font-bold text-white mb-1 opacity-80">
-            {myPlayer.role === 'civilian' ? '😇 Citoyen' : myPlayer.role === 'undercover' ? '🦹 Undercover' : '👻 Mister White'}
-            {' '}— Touche pour {wordRevealed ? 'cacher' : 'révéler'}
-          </p>
+          <div
+              className="p-6 rounded-3xl mb-6 text-center cursor-pointer hover-lift"
+              style={{
+                  background: 'var(--accent-blue)', // 🔥 toujours bleu
+                  border: '3px solid var(--border)',
+                  boxShadow: 'var(--shadow-xl)',
+              }}
+              onClick={() => setWordRevealed(!wordRevealed)}
+          >
+            <p className="font-body text-sm font-bold text-white mb-1 opacity-80">
+                🔒 Ton mot secret — Touche pour {wordRevealed ? 'cacher' : 'révéler'}
+            </p>
           {wordRevealed ? (
               <div className="font-cartoon text-5xl sm:text-6xl text-white" style={{ textShadow: '3px 3px 0px rgba(0,0,0,0.3)' }}>
-                {myPlayer.role === 'mister_white' ? '❓' : myPlayer.word}
+                  {myPlayer.word || '❓'}
               </div>
           ) : (
               <div className="font-cartoon text-5xl text-white opacity-50">
