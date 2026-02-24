@@ -95,11 +95,11 @@ export default function LobbyPage() {
                 return { ...p, role, word }
             })
 
-            // Update each player
+            // Update each player (reset clues/votes pour nouvelle partie)
             for (const player of assignments) {
                 await supabase
                     .from('game_players')
-                    .update({ role: player.role, word: player.word })
+                    .update({ role: player.role, word: player.word, clues: [], vote_target: null })
                     .eq('id', player.id)
             }
 
