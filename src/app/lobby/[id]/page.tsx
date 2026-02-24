@@ -22,13 +22,14 @@ export default function LobbyPage() {
     }, [])
 
     useEffect(() => {
-        if (!id) return
+        if (!id || !user) return // on attend que l'user soit défini
 
         const fetchData = async () => {
             const { data: g } = await supabase.from('games').select('*').eq('id', id).single()
             setGame(g)
+            // on redirige seulement si le jeu est en "playing"
             if (g?.status === 'playing') {
-                router.push(`/game/${id}`)
+                router.replace(`/game/${id}`)
             }
 
             const { data: p } = await supabase.from('game_players').select('*').eq('game_id', id)
@@ -43,7 +44,7 @@ export default function LobbyPage() {
             .on('postgres_changes', { event: '*', schema: 'public', table: 'games', filter: `id=eq.${id}` }, (payload: any) => {
                 setGame(payload.new)
                 if (payload.new.status === 'playing') {
-                    router.push(`/game/${id}`)
+                    router.replace(`/game/${id}`) // replace pour éviter de empiler l'historique
                 }
             })
             .on('postgres_changes', { event: '*', schema: 'public', table: 'game_players', filter: `game_id=eq.${id}` }, () => {
@@ -52,7 +53,7 @@ export default function LobbyPage() {
             .subscribe()
 
         return () => { supabase.removeChannel(gameSub) }
-    }, [id])
+    }, [id, user])
 
     const isHost = user && game && game.host_id === user.id
 
