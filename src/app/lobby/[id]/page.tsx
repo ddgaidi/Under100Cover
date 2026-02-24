@@ -114,6 +114,7 @@ export default function LobbyPage() {
                 turn_order: turnOrder,
                 current_round: 1,
                 current_turn_index: 0,
+                turn_started_at: new Date().toISOString(), // 👈 ICI
             }).eq('id', id)
 
             showToast('La partie commence ! 🎭', 'success', '🚀')

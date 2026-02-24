@@ -43,7 +43,11 @@ export default function GamePage() {
         .eq('game_id', id)
       setPlayers(p || [])
 
-      const me = (p || []).find((pl: any) => pl.user_id === user.id)
+      const me = (p || []).find((pl: any) => pl.user_id === user?.id)
+
+      if (!me) {
+        console.warn("Player not found for user:", user?.id)
+      }
       setMyPlayer(me)
     }
 
@@ -250,11 +254,21 @@ export default function GamePage() {
     setShowMisterWhiteGuess(false)
   }
 
-  if (!game || !myPlayer) {
+  if (!game) {
     return (
-      <div className="min-h-[70vh] flex items-center justify-center">
-        <div className="cartoon-spinner" />
-      </div>
+        <div className="min-h-[70vh] flex items-center justify-center">
+          <div className="cartoon-spinner" />
+        </div>
+    )
+  }
+
+  if (!myPlayer) {
+    return (
+        <div className="min-h-[70vh] flex items-center justify-center">
+          <div className="text-center">
+            <p>Connexion au joueur...</p>
+          </div>
+        </div>
     )
   }
 
