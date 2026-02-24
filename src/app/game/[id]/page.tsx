@@ -91,8 +91,8 @@ export default function GamePage() {
             .eq('user_id', user.id)
 
         const newIndex = currentTurnIndex + 1
-        const newRound = Math.floor(newIndex / totalPlayers)
-        const completedAllRounds = newRound >= game.rounds_before_vote
+        const newRound = Math.floor(newIndex / totalPlayers) // ex: Math.floor(1/3) = 0
+        const completedAllRounds = newRound >= game.rounds_before_vote // 0 >= 2 = false ✅
 
         if (newIndex % totalPlayers === 0 && completedAllRounds) {
             // Tout le monde a parlé tous ses tours → VOTE
@@ -199,19 +199,18 @@ export default function GamePage() {
         }
     }
 
-    // Watcher : si tout le monde a voté et que je suis le "resolver" (dernier par user_id)
+    // APRÈS (safe)
     useEffect(() => {
-        if (!isVoting || !players.length || !user) return
+        if (!isVoting || !players.length || !user || isSubmitting) return
         const activePl = players.filter(p => !p.is_eliminated)
+        if (activePl.length === 0) return
         const allVoted = activePl.every(p => p.vote_target)
         if (!allVoted) return
-
-        // Éviter double résolution : seulement le joueur avec le plus grand user_id
         const resolver = [...activePl].sort((a, b) => b.user_id.localeCompare(a.user_id))[0]
         if (resolver?.user_id === user.id) {
             resolveVotes(players)
         }
-    }, [players])
+    }, [players, isVoting, user?.id])
 
     const submitMisterWhiteGuess = async () => {
         const civilianWord = game?.civilian_word?.toLowerCase().trim()
